@@ -9,14 +9,32 @@ export const config = {
 import formidable, { File as FormidableFile, Files } from 'formidable';
 import fs from 'fs';
 import FormData from 'form-data';
+import ffmpeg from 'fluent-ffmpeg';
+import ffmpegPath from 'ffmpeg-static';
+import path from 'path';
+
+ffmpeg.setFfmpegPath(ffmpegPath as string);
 
 async function parseForm(req: NextApiRequest): Promise<{ audio: FormidableFile }> {
   return new Promise((resolve, reject) => {
     const form = formidable({ multiples: false });
     form.parse(req, (err: any, fields: any, files: Files) => {
       if (err) return reject(err);
-      resolve(files as { audio: FormidableFile });
+      const audio = (files as any).audio as FormidableFile | FormidableFile[];
+      if (!audio) return reject(new Error('No audio file uploaded'));
+      // If multiple files, take the first
+      resolve({ audio: Array.isArray(audio) ? audio[0] : audio });
     });
+  });
+}
+
+function convertWebmToWav(inputPath: string, outputPath: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    ffmpeg(inputPath)
+      .toFormat('wav')
+      .on('error', reject)
+      .on('end', () => resolve(outputPath))
+      .save(outputPath);
   });
 }
 
@@ -28,11 +46,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const { audio } = await parseForm(req);
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) return res.status(500).json({ error: 'No OpenAI API key' });
-    // Read audio file
-    const audioStream = fs.createReadStream(audio.filepath);
+    // Convert webm to wav
+    const wavPath = path.join(process.cwd(), 'tmp', `${Date.now()}_audio.wav`);
+    await fs.promises.mkdir(path.dirname(wavPath), { recursive: true });
+    await convertWebmToWav(audio.filepath, wavPath);
+    const audioStream = fs.createReadStream(wavPath);
     // Whisper transcription
     const whisperForm = new FormData();
-    whisperForm.append('file', audioStream, audio.originalFilename || 'audio.webm');
+    whisperForm.append('file', audioStream, 'audio.wav');
     whisperForm.append('model', 'whisper-1');
     const whisperRes = await fetch('https://api.openai.com/v1/audio/transcriptions', {
       method: 'POST',
@@ -48,6 +69,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
     const whisperData = await whisperRes.json();
     const transcript = whisperData.text || '';
+    // Clean up temp file
+    fs.unlink(wavPath, () => {});
     // GPT feedback
     const gptRes = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
@@ -72,6 +95,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const feedback = gptData.choices?.[0]?.message?.content || '';
     res.status(200).json({ transcript, feedback });
   } catch (err: any) {
-    res.status(500).json({ error: 'Server error', details: err.message });
+    console.error('API /analyze error:', err);
+    res.status(500).json({ error: 'Server error', details: err.message || err.toString(), stack: err.stack });
   }
 } 

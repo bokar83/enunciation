@@ -5,7 +5,7 @@ export default function RecordingPage() {
   const [recording, setRecording] = useState(false);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [recordingLength, setRecordingLength] = useState<number | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<{ message: string; details?: string; stack?: string } | null>(null);
   const [amplitude, setAmplitude] = useState(0);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunks = useRef<Blob[]>([]);
@@ -80,7 +80,7 @@ export default function RecordingPage() {
       mediaRecorder.start();
       setRecording(true);
     } catch (err) {
-      setError("Sorry, I couldn't catch that. Try again.");
+      setError({ message: "Sorry, I couldn't catch that. Try again.", details: err instanceof Error ? err.message : undefined, stack: err instanceof Error ? err.stack : undefined });
       setRecording(false);
     }
   };
@@ -90,7 +90,7 @@ export default function RecordingPage() {
       mediaRecorderRef.current?.stop();
       setRecording(false);
     } catch {
-      setError("Sorry, I couldn't catch that. Try again.");
+      setError({ message: "Sorry, I couldn't catch that. Try again.", details: undefined, stack: undefined });
       setRecording(false);
     }
   };
@@ -125,7 +125,7 @@ export default function RecordingPage() {
       historyRef.current = [entry, ...historyRef.current];
       setHistory([...historyRef.current]);
     } catch (err) {
-      setError("Sorry, something went wrong with analysis. Try again.");
+      setError({ message: "Sorry, something went wrong with analysis. Try again.", details: err instanceof Error ? err.message : undefined, stack: err instanceof Error ? err.stack : undefined });
     } finally {
       setLoading(false);
     }
@@ -242,7 +242,15 @@ export default function RecordingPage() {
           </div>
         )}
         {error && (
-          <div className="w-full text-center text-red-500 font-semibold mt-2">{error}</div>
+          <div className="w-full text-center text-red-500 font-semibold mt-2">
+            {error.message}
+            {error.details && (
+              <div className="text-xs text-red-400 mt-1">{error.details}</div>
+            )}
+            {error.stack && (
+              <pre className="text-xs text-red-300 mt-1 whitespace-pre-wrap">{error.stack}</pre>
+            )}
+          </div>
         )}
         {history.length > 0 && (
           <div className="w-full max-w-xs mx-auto mt-8 bg-white rounded shadow p-3">
